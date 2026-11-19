@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: go vet ./...
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
+          staticcheck ./...
+      - name: gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks detect --no-banner --source . --verbose
+      - name: Test
+        run: go test -race -count=1 -timeout 5m -short ./...
+      - name: Fuzz (corto)
+        run: |
+          go test -fuzz=FuzzComputeHash -fuzztime=10s ./internal/domain
+          go test -fuzz=FuzzDecodeOpen -fuzztime=10s ./internal/adapters/httpapi
+          go test -fuzz=FuzzDecodeTransfer -fuzztime=10s ./internal/adapters/httpapi
+
+  sim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Fault injection harness
+        run: go test -count=1 -timeout 8m ./internal/sim -run '^TestFaultInjection$'
+        env:
+          LEDGER_SIM_SEEDS: "2000"
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ledger
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/ledger?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test Postgres adapter
+        run: go test -count=1 -timeout 3m -race ./internal/adapters/postgres
+
+  tlc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Model check Ledger.tla
+        run: ./scripts/tla-check.sh

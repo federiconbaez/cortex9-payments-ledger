@@ -1,0 +1,14 @@
+/.lab/
+*.exe
+*.test
+*.out
+*.prof
+coverage.out
+coverage.html
+.idea/
+*.iml
+/bin/
+/tools/tla2tools.jar
+/tmp/
+*.log
+**/testdata/fuzz/
